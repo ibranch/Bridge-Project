@@ -28,12 +28,12 @@ if __name__ == "__main__":
 
         print "Bridge " + id + " starting up\n"
 
-        # Send initial BPDU
-        msg = {'source': id, 'dest': 'ffff', 'type': 'bpdu', 'message': {}}
-        for s in sockets:
-
-                s.send()
-
+        def bpdu(msg):
+                root = msg.root
+                cost = msg.cost+1
+            for socket in sockets:
+                    bpdu_message = '{"source": "'+id+'", "dest":"ffff, "type":"BPDU", "message" : {"id" : "'+id+'", "root" : "'+root+'", "cost" : '+cost+'}}'
+                    socket.send(bpdu_message)
         # Main loop
         while True:
                 # Calls select with all the sockets; change the timeout value (1)
@@ -42,5 +42,8 @@ if __name__ == "__main__":
                 # Reads from each fo the ready sockets
                 for x in ready:
                         data = x.recv(1500)
+                        type = data["type"]
+                        if type == 'BPDU' :
+                               bpdu(data["message"])
                         print('DATADATADATA:   ' + data)
 
