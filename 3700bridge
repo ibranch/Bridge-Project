@@ -4,6 +4,7 @@ import sys
 import socket
 import select
 import json
+import time
 
 # pads the name with null bytes at the end
 def pad(name):
@@ -16,50 +17,46 @@ if __name__ == "__main__":
     id = sys.argv[1]
     LAN = sys.argv[2:]
 
-
     class Bridge(object):
         def __init__(self, id, lan):
-                self.id = id
-                self.root = id
-                self.cost = 0
-                self.sockets = []
-                self.ports = len(lan)
-                self.root_port = 0
-                for x in range(self.ports):
-                        s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-                        s.connect(pad(lan[x]))
-                        self.sockets.append(s)
+            self.id = id
+            self.root = id
+            self.cost = 0
+            self.sockets = []
+            self.ports = len(lan)
+            self.root_port = 0
+            for x in range(self.ports):
+                s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+                s.connect(pad(lan[x]))
+                self.sockets.append(s)
 
         def update_bridge(self, message_root, message_cost, message_id):
-                self.root = message_root
-                self.cost = message_cost + 1
-                self.root_port = message_id
-                self.send_bpdu()
+            self.root = message_root
+            self.cost = message_cost + 1
+            self.root_port = message_id
+            self.send_bpdu()
 
         def send_bpdu(self):
-                for s in self.sockets:
-                    bpdu_message = {"source": bridge.id, "dest": 'ffff', "type": 'bpdu',
-                                    "message": {"id": bridge.id, "root": bridge.root, "cost": bridge.cost}}
-                    s.send(json.dumps(bpdu_message))
+            for s in self.sockets:
+                bpdu_message = {"source": self.id, "dest": 'ffff', "type": 'bpdu',
+                                "message": {"id": self.id, "root": self.root, "cost": self.cost}}
+                s.send(json.dumps(bpdu_message))
 
         def recieve_bpdu(self, data):
-                message = data['message']
-                message_root = message['root']
-                message_cost = message['cost']
-                message_id = message['id']
-                if message_root < self.root:
-                        self.update_bridge(message_root, message_cost, message_id)
-                elif message_root == self.root and message_cost < self.cost:
-                        self.update_bridge(message_root, message_cost, message_id)
-                elif message_root == self.root and message_cost == self.cost and message_id < self.id:
-                        self.update_bridge(message_root, message_cost, message_id)
-
+            message = data['message']
+            message_root = message['root']
+            message_cost = message['cost']
+            message_id = message['id']
+            if int(message_root, 16) < int(self.root, 16):
+                self.update_bridge(message_root, message_cost, message_id)
+            elif message_root == self.root and message_cost < self.cost:
+                self.update_bridge(message_root, message_cost, message_id)
+            elif message_root == self.root and message_cost == self.cost and int(message_id, 16) < int(self.id, 16):
+                self.update_bridge(message_root, message_cost, message_id)
 
     bridge = Bridge(id, LAN)
-    initial_message = {"id": bridge.id, "root": bridge.root, "cost": bridge.cost}
+    time.sleep(1)
     bridge.send_bpdu()
-
-    #root_port = sockets[0]  # random assignation of first root_port
 
     print "Bridge " + bridge.id + " starting up\n"
     # Main loop
@@ -74,5 +71,6 @@ if __name__ == "__main__":
             message_type = parsed_data['type']
             if message_type == 'bpdu':
                 bridge.recieve_bpdu(parsed_data)
+            else:
+                print 'My root is: %s My cost is: %s My root port is is: %s ' % (bridge.root, bridge.cost, bridge.root_port)
 
-        print 'My root is: %s\nMy cost is: %s\nMy root port is: %s\n' % (bridge.root, bridge.cost, bridge.root_port)
