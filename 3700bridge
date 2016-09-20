@@ -4,51 +4,65 @@ import sys
 import socket
 import select
 import json
- 
+
 # pads the name with null bytes at the end
 def pad(name):
-        result = '\0' + name
-        while len(result) < 108:
-                result += '\0'
-        return result
- 
+    result = '\0' + name
+    while len(result) < 108:
+        result += '\0'
+    return result
+
 if __name__ == "__main__":
-        id = sys.argv[1]
-        LAN = sys.argv[2:]
-        sockets = []
-        root = id
-        cost = 0
+    id = sys.argv[1]
+    LAN = sys.argv[2:]
+    sockets = []
+    root = id
+    cost = 0
 
-        # data structure for spanning tree
-        
-        # creates sockets and connects to them
-        for x in range(len(LAN)):
-                s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-                s.connect(pad(LAN[x]))
-                sockets.append(s)
+    # creates sockets and connects to them
+    for x in range(len(LAN)):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        s.connect(pad(LAN[x]))
+        sockets.append(s)
 
-        print "Bridge " + id + " starting up\n"
+    root_port = sockets[0]  # random assignation of first root_port
 
-        def bpdu(msg):
-                root = msg.root
-                cost = msg.cost+1
-                for s in sockets:
-                    bpdu_message = {"source": id, "dest":'ffff', "type":'BPDU', "message": {"id" : id, "root": root, "cost": cost}}
-                    s.send(json.dumps(bpdu_message))
+    print "Bridge " + id + " starting up\n"
 
-        initial_message = {"id": id, "root": root, "cost": cost}
-        bpdu(initial_message)
-        # Main loop
-        while True:
-                # Calls select with all the sockets; change the timeout value (1)
-                ready, ignore, ignore2 = select.select(sockets, [], [], 1)
- 
-                # Reads from each fo the ready sockets
-                for x in ready:
-                        data = x.recv(1500)
-                        parsed_data = json.loads(data)
-                        data_type = parsed_data["type"]
+    # TODO figure out how to scope variables without a class/put this in a class
+    def receive_bpdu(msg):
+        def update_tree(msg):
+            root = parsed_data['message']['root']
+            cost = parsed_data['message']['cost']
+            root_port = parsed_data['message']['id']
+            send_bpdu(msg)
 
-                        if data_type == 'BPDU':
-                                data_message = parsed_data["message"]
-                                bpdu(data_message)
+        if parsed_data['message']['root'] < root:
+            update_tree(msg)
+        elif parsed_data['message']['root'] == root and parsed_data['message']['cost'] < cost:
+            update_tree(msg)
+        elif parsed_data['message']['root'] == root and parsed_data['message']['cost'] == cost and parsed_data['message']['id'] < id:
+            update_tree(msg)
+
+    def send_bpdu(msg):
+        for s in sockets:
+            bpdu_message = {"source": id, "dest":'ffff', "type":'bpdu', "message": {"id" : id, "root": root, "cost": cost}}
+            s.send(json.dumps(bpdu_message))
+
+    # Send initial BPDUs
+    initial_message = {"id": id, "root": root, "cost": cost}
+    send_bpdu(initial_message)
+
+    # Main loop
+    while True:
+        # Calls select with all the sockets; change the timeout value (1)
+        ready, ignore, ignore2 = select.select(sockets, [], [], 1)
+
+        # Reads from each fo the ready sockets
+        for x in ready:
+            data = x.recv(1500)
+            parsed_data = json.loads(data)
+            if parsed_data['type'] == 'bpdu':
+                receive_bpdu(parsed_data)
+
+        print 'My root is: %s\nMy cost is: %s\nMy root port is: %s\n' % (root, cost, root_port)
