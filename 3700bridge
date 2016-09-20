@@ -32,9 +32,12 @@ if __name__ == "__main__":
         def bpdu(msg):
                 root = msg.root
                 cost = msg.cost+1
-            for socket in sockets:
-                    bpdu_message = '{"source": "'+id+'", "dest":"ffff, "type":"BPDU", "message" : {"id" : "'+id+'", "root" : "'+root+'", "cost" : "'+cost+'"}}'
-                    socket.send(bpdu_message)
+                for s in sockets:
+                    bpdu_message = {"source": id, "dest":'ffff', "type":'BPDU', "message": {"id" : id, "root": root, "cost": cost}}
+                    s.send(json.dumps(bpdu_message))
+
+        initial_message = {"id": id, "root": root, "cost": cost}
+        bpdu(initial_message)
         # Main loop
         while True:
                 # Calls select with all the sockets; change the timeout value (1)
@@ -46,8 +49,6 @@ if __name__ == "__main__":
                         parsed_data = json.loads(data)
                         data_type = parsed_data["type"]
 
-                        if data_type == 'BPDU' :
+                        if data_type == 'BPDU':
                                 data_message = parsed_data["message"]
-                               bpdu(data_message)
-                        print('DATADATADATA:   ' + data)
-
+                                bpdu(data_message)
