@@ -3,6 +3,7 @@
 import sys
 import socket
 import select
+import json
  
 # pads the name with null bytes at the end
 def pad(name):
@@ -32,7 +33,7 @@ if __name__ == "__main__":
                 root = msg.root
                 cost = msg.cost+1
             for socket in sockets:
-                    bpdu_message = '{"source": "'+id+'", "dest":"ffff, "type":"BPDU", "message" : {"id" : "'+id+'", "root" : "'+root+'", "cost" : '+cost+'}}'
+                    bpdu_message = '{"source": "'+id+'", "dest":"ffff, "type":"BPDU", "message" : {"id" : "'+id+'", "root" : "'+root+'", "cost" : "'+cost+'"}}'
                     socket.send(bpdu_message)
         # Main loop
         while True:
@@ -42,8 +43,11 @@ if __name__ == "__main__":
                 # Reads from each fo the ready sockets
                 for x in ready:
                         data = x.recv(1500)
-                        type = data["type"]
-                        if type == 'BPDU' :
-                               bpdu(data["message"])
+                        parsed_data = json.loads(data)
+                        data_type = parsed_data["type"]
+
+                        if data_type == 'BPDU' :
+                                data_message = parsed_data["message"]
+                               bpdu(data_message)
                         print('DATADATADATA:   ' + data)
 
