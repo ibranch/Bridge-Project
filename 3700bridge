@@ -15,54 +15,64 @@ def pad(name):
 if __name__ == "__main__":
     id = sys.argv[1]
     LAN = sys.argv[2:]
-    sockets = []
-    root = id
-    cost = 0
 
-    # creates sockets and connects to them
-    for x in range(len(LAN)):
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-        s.connect(pad(LAN[x]))
-        sockets.append(s)
 
-    root_port = sockets[0]  # random assignation of first root_port
+    class Bridge(object):
+        def __init__(self, id, lan):
+                self.id = id
+                self.root = id
+                self.cost = 0
+                self.sockets = []
+                self.ports = len(lan)
+                self.root_port = 0
+                for x in range(self.ports):
+                        s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+                        s.connect(pad(lan[x]))
+                        self.sockets.append(s)
 
-    print "Bridge " + id + " starting up\n"
+        def update_bridge(self, message_root, message_cost, message_id):
+                self.root = message_root
+                self.cost = message_cost + 1
+                self.root_port = message_id
+                self.send_bpdu()
 
-    # TODO figure out how to scope variables without a class/put this in a class
-    def receive_bpdu(msg):
-        def update_tree(msg):
-            root = parsed_data['message']['root']
-            cost = parsed_data['message']['cost']
-            root_port = parsed_data['message']['id']
-            send_bpdu(msg)
+        def send_bpdu(self):
+                for s in self.sockets:
+                    bpdu_message = {"source": bridge.id, "dest": 'ffff', "type": 'bpdu',
+                                    "message": {"id": bridge.id, "root": bridge.root, "cost": bridge.cost}}
+                    s.send(json.dumps(bpdu_message))
 
-        if parsed_data['message']['root'] < root:
-            update_tree(msg)
-        elif parsed_data['message']['root'] == root and parsed_data['message']['cost'] < cost:
-            update_tree(msg)
-        elif parsed_data['message']['root'] == root and parsed_data['message']['cost'] == cost and parsed_data['message']['id'] < id:
-            update_tree(msg)
+        def recieve_bpdu(self, data):
+                message = data['message']
+                message_root = message['root']
+                message_cost = message['cost']
+                message_id = message['id']
+                if message_root < self.root:
+                        self.update_bridge(message_root, message_cost, message_id)
+                elif message_root == self.root and message_cost < self.cost:
+                        self.update_bridge(message_root, message_cost, message_id)
+                elif message_root == self.root and message_cost == self.cost and message_id < self.id:
+                        self.update_bridge(message_root, message_cost, message_id)
 
-    def send_bpdu(msg):
-        for s in sockets:
-            bpdu_message = {"source": id, "dest":'ffff', "type":'bpdu', "message": {"id" : id, "root": root, "cost": cost}}
-            s.send(json.dumps(bpdu_message))
 
-    # Send initial BPDUs
-    initial_message = {"id": id, "root": root, "cost": cost}
-    send_bpdu(initial_message)
+    bridge = Bridge(id, LAN)
+    initial_message = {"id": bridge.id, "root": bridge.root, "cost": bridge.cost}
+    bridge.send_bpdu()
 
+    #root_port = sockets[0]  # random assignation of first root_port
+
+    print "Bridge " + bridge.id + " starting up\n"
     # Main loop
     while True:
         # Calls select with all the sockets; change the timeout value (1)
-        ready, ignore, ignore2 = select.select(sockets, [], [], 1)
+        ready, ignore, ignore2 = select.select(bridge.sockets, [], [], 1)
 
         # Reads from each fo the ready sockets
         for x in ready:
             data = x.recv(1500)
             parsed_data = json.loads(data)
-            if parsed_data['type'] == 'bpdu':
-                receive_bpdu(parsed_data)
+            message_type = parsed_data['type']
+            if message_type == 'bpdu':
+                bridge.recieve_bpdu(parsed_data)
 
-        print 'My root is: %s\nMy cost is: %s\nMy root port is: %s\n' % (root, cost, root_port)
+        print 'My root is: %s\nMy cost is: %s\nMy root port is: %s\n' % (bridge.root, bridge.cost, bridge.root_port)
