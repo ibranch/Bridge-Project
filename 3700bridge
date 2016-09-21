@@ -25,15 +25,19 @@ if __name__ == "__main__":
             self.sockets = []
             self.ports = len(lan)
             self.root_port = 0
+            self.designated_bridge = id
             for x in range(self.ports):
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
                 s.connect(pad(lan[x]))
                 self.sockets.append(s)
 
-        def update_bridge(self, message_root, message_cost, message_id):
+            self.bpdu_sockets = []
+
+        def update_bridge(self, message_root, message_cost, message_id, port_number):
             self.root = message_root
             self.cost = message_cost + 1
-            self.root_port = message_id
+            self.designated_bridge = message_id
+            self.root_port = port_number
             self.send_bpdu()
 
         def send_bpdu(self):
@@ -42,35 +46,55 @@ if __name__ == "__main__":
                                 "message": {"id": self.id, "root": self.root, "cost": self.cost}}
                 s.send(json.dumps(bpdu_message))
 
-        def recieve_bpdu(self, data):
+        def recieve_bpdu(self, data, port_number):
             message = data['message']
             message_root = message['root']
             message_cost = message['cost']
             message_id = message['id']
             if int(message_root, 16) < int(self.root, 16):
-                self.update_bridge(message_root, message_cost, message_id)
-            elif message_root == self.root and message_cost < self.cost:
-                self.update_bridge(message_root, message_cost, message_id)
+                self.update_bridge(message_root, message_cost, message_id, port_number)
+            elif message_root == self.root and message_cost + 1 < self.cost:
+                self.update_bridge(message_root, message_cost, message_id, port_number)
             elif message_root == self.root and message_cost == self.cost and int(message_id, 16) < int(self.id, 16):
-                self.update_bridge(message_root, message_cost, message_id)
+                self.update_bridge(message_root, message_cost, message_id, port_number)
 
     bridge = Bridge(id, LAN)
-    time.sleep(1)
-    bridge.send_bpdu()
 
     print "Bridge " + bridge.id + " starting up\n"
+
+    bpdu_timer = time.time()
+    time.sleep(.1)  # give time for all bridges to initialize before we send initial bpdu
+    bridge.send_bpdu()
+
     # Main loop
+    debug_iteration = 1
     while True:
         # Calls select with all the sockets; change the timeout value (1)
+        if time.time() - bpdu_timer > .5:
+            bridge.send_bpdu()
+            bpdu_timer = time.time()
+            continue
         ready, ignore, ignore2 = select.select(bridge.sockets, [], [], 1)
 
         # Reads from each fo the ready sockets
         for x in ready:
             data = x.recv(1500)
+            port_number = x.fileno()
             parsed_data = json.loads(data)
             message_type = parsed_data['type']
             if message_type == 'bpdu':
-                bridge.recieve_bpdu(parsed_data)
+                if x not in bridge.bpdu_sockets:
+                    bridge.bpdu_sockets.append(x)
+                bridge.recieve_bpdu(parsed_data, port_number)
             else:
-                print 'My root is: %s My cost is: %s My root port is is: %s ' % (bridge.root, bridge.cost, bridge.root_port)
-
+                if bridge.id == 'f8ad':
+                    print 'debug iteration %d\n' % debug_iteration
+                    debug_iteration += 1
+                    print 'My root is: %s\n' \
+                          'My cost is: %s\n' \
+                          'My designated bridge is: %s\n' \
+                          'My root port is: %s' \
+                          % (bridge.root,
+                             bridge.cost,
+                             bridge.designated_bridge,
+                             bridge.root_port)
