@@ -66,16 +66,8 @@ if __name__ == "__main__":
 
         def close_ports(self):
             self.closed_ports = self.bridge_ports
-            print self.closed_ports
-            print self.root_port
-            try:
-
-                if self.root_port == 0:
-                    print 'Designated Bridge'
-                else:
-                    self.closed_ports.remove(self.root_port)
-            except ValueError:
-                print 'Designated Bridge'
+            if self.root_port in self.closed_ports:
+                self.closed_ports.remove(self.root_port)
 
         def broadcast_all(self, message):
             for x in self.sockets:
@@ -124,7 +116,7 @@ if __name__ == "__main__":
                 bridge.recieve_bpdu(parsed_data, port_number)
             elif message_type == 'data':
                 if parsed_data['dest'] not in bridge.routing_table:
-                    bridge.broadcast_all(data)
+                    bridge.broadcast_open(data)
                 else:
                     bridge.routing_table[data['dest']].send(parsed_data)
                 pass
@@ -135,7 +127,9 @@ if __name__ == "__main__":
               'My cost is: %s\n' \
               'My designated bridge is: %s\n' \
               'My root port is: %s' \
+              'My closed ports are: %s' \
               % (bridge.root,
                  bridge.cost,
                  bridge.designated_bridge,
-                 bridge.root_port)
+                 bridge.root_port,
+                 bridge.closed_ports)
