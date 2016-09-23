@@ -66,11 +66,8 @@ if __name__ == "__main__":
 
         def close_ports(self):
             self.closed_ports = self.bridge_ports
-            try:
+            if self.root_port in self.closed_ports:
                 self.closed_ports.remove(self.root_port)
-            except ValueError:
-                print 'ERR: Root Port not in Bridge Ports'
-                exit()
 
         def broadcast_all(self, message):
             for x in self.sockets:
@@ -116,20 +113,21 @@ if __name__ == "__main__":
                     bridge.bpdu_sockets.append(x)
                 bridge.recieve_bpdu(parsed_data, port_number)
             elif message_type == 'data':
-                if parsed_data['destination'] not in bridge.routing_table:
+                if parsed_data['dest'] not in bridge.routing_table:
                     bridge.broadcast_all(parsed_data)
                 else:
-                    bridge.routing_table[parsed_data['destination']].send(parsed_data)
+                    bridge.routing_table[parsed_data['dest']].send(parsed_data)
                 pass
-            else:
-                if bridge.id == 'f8ad':
-                    print 'debug iteration %d\n' % debug_iteration
-                    debug_iteration += 1
-                    print 'My root is: %s\n' \
-                          'My cost is: %s\n' \
-                          'My designated bridge is: %s\n' \
-                          'My root port is: %s' \
-                          % (bridge.root,
-                             bridge.cost,
-                             bridge.designated_bridge,
-                             bridge.root_port)
+
+        print 'debug iteration %d\n' % debug_iteration
+        debug_iteration += 1
+        print 'My root is: %s\n' \
+              'My cost is: %s\n' \
+              'My designated bridge is: %s\n' \
+              'My root port is: %s' \
+              'My closed ports are: %s' \
+              % (bridge.root,
+                 bridge.cost,
+                 bridge.designated_bridge,
+                 bridge.root_port,
+                 bridge.closed_ports)
