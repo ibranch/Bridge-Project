@@ -66,11 +66,16 @@ if __name__ == "__main__":
 
         def close_ports(self):
             self.closed_ports = self.bridge_ports
+            print self.closed_ports
+            print self.root_port
             try:
-                self.closed_ports.remove(self.root_port)
+
+                if self.root_port == 0:
+                    print 'Designated Bridge'
+                else:
+                    self.closed_ports.remove(self.root_port)
             except ValueError:
-                print 'ERR: Root Port not in Bridge Ports'
-                exit()
+                print 'Designated Bridge'
 
         def broadcast_all(self, message):
             for x in self.sockets:
@@ -79,6 +84,7 @@ if __name__ == "__main__":
         def broadcast_open(self, message):
             for x in self.sockets:
                 if x.fileno() not in self.closed_ports:
+                    print message
                     x.send(message)
 
     bridge = Bridge(id, LAN)
@@ -94,7 +100,7 @@ if __name__ == "__main__":
     debug_iteration = 1
     while True:
         # Calls select with all the sockets; change the timeout value (1)
-        if time.time() - .75 > time_since_bpdu:
+        if time.time() - 1 > time_since_bpdu:
             bridge.close_ports()
 
         ##### IS THIS LOGIC NEEDEED (send bpdu every 500ms regardless #####
@@ -109,27 +115,26 @@ if __name__ == "__main__":
         for x in ready:
             data = x.recv(1500)
             port_number = x.fileno()
+            print 'port number: %s' % (port_number)
             parsed_data = json.loads(data)
             message_type = parsed_data['type']
             if message_type == 'bpdu':
                 if x not in bridge.bpdu_sockets:
                     bridge.bpdu_sockets.append(x)
                 bridge.recieve_bpdu(parsed_data, port_number)
-            elif message_type == 'data':d
-                if parsed_data['destination'] not in bridge.routing_table:
-                    bridge.broadcast_all(parsed_data)
+            elif message_type == 'data':
+                if parsed_data['dest'] not in bridge.routing_table:
+                    bridge.broadcast_all(data)
                 else:
-                    bridge.routing_table[parsed_data['destination']].send(parsed_data)
+                    bridge.routing_table[data['dest']].send(parsed_data)
                 pass
-            else:
-                if bridge.id == 'f8ad':
-                    print 'debug iteration %d\n' % debug_iteration
-                    debug_iteration += 1
-                    print 'My root is: %s\n' \
-                          'My cost is: %s\n' \
-                          'My designated bridge is: %s\n' \
-                          'My root port is: %s' \
-                          % (bridge.root,
-                             bridge.cost,
-                             bridge.designated_bridge,
-                             bridge.root_port)
+            print 'debug iteration %d\n' % debug_iteration
+            debug_iteration += 1
+            print 'My root is: %s\n' \
+                  'My cost is: %s\n' \
+                  'My designated bridge is: %s\n' \
+                  'My root port is: %s' \
+                  % (bridge.root,
+                     bridge.cost,
+                     bridge.designated_bridge,
+                     bridge.root_port)
