@@ -128,13 +128,14 @@ if __name__ == "__main__":
                 else:
                     bridge.routing_table[data['dest']].send(parsed_data)
                 pass
-            print 'debug iteration %d\n' % debug_iteration
-            debug_iteration += 1
-            print 'My root is: %s\n' \
-                  'My cost is: %s\n' \
-                  'My designated bridge is: %s\n' \
-                  'My root port is: %s' \
-                  % (bridge.root,
-                     bridge.cost,
-                     bridge.designated_bridge,
-                     bridge.root_port)
+
+        print 'debug iteration %d\n' % debug_iteration
+        debug_iteration += 1
+        print 'My root is: %s\n' \
+              'My cost is: %s\n' \
+              'My designated bridge is: %s\n' \
+              'My root port is: %s' \
+              % (bridge.root,
+                 bridge.cost,
+                 bridge.designated_bridge,
+                 bridge.root_port)
