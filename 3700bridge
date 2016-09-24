@@ -42,8 +42,6 @@ if __name__ == "__main__":
             self.cost = message_cost + 1
             self.designated_bridge = message_id
             self.root_port = port_number
-            if port_number not in self.bridge_ports:
-                self.bridge_ports.append(port_number)
             self.send_bpdu()
 
         def send_bpdu(self):
@@ -57,6 +55,10 @@ if __name__ == "__main__":
             message_root = message['root']
             message_cost = message['cost']
             message_id = message['id']
+
+            if port_number not in self.bridge_ports:
+                self.bridge_ports.append(port_number)
+
             if int(message_root, 16) < int(self.root, 16):
                 self.update_bridge(message_root, message_cost, message_id, port_number)
             elif message_root == self.root and message_cost + 1 < self.cost:
@@ -65,18 +67,20 @@ if __name__ == "__main__":
                 self.update_bridge(message_root, message_cost, message_id, port_number)
 
         def close_ports(self):
-            self.closed_ports = self.bridge_ports
-            if self.root_port in self.closed_ports:
-                self.closed_ports.remove(self.root_port)
+            if self.root_port != 0:
+                self.closed_ports = self.bridge_ports[:]
+                if self.root_port in self.closed_ports:
+                    self.closed_ports.remove(self.root_port)
 
         def broadcast_all(self, message):
             for x in self.sockets:
                 x.send(message)
 
-        def broadcast_open(self, message):
+        def broadcast_open(self, message, incoming_port):
             for x in self.sockets:
-                if x.fileno() not in self.closed_ports:
-                    print message
+                incoming_bridge_port = (x.fileno() == incoming_port and incoming_port in self.bridge_ports)
+                if x.fileno() not in self.closed_ports and not incoming_bridge_port:
+                    print 'broadcasting %s to %s' % (message, x.fileno())
                     x.send(message)
 
     bridge = Bridge(id, LAN)
@@ -92,7 +96,7 @@ if __name__ == "__main__":
     debug_iteration = 1
     while True:
         # Calls select with all the sockets; change the timeout value (1)
-        if time.time() - 1 > time_since_bpdu:
+        if time.time() - .5 > time_since_bpdu:
             bridge.close_ports()
 
         ##### IS THIS LOGIC NEEDEED (send bpdu every 500ms regardless #####
@@ -107,7 +111,6 @@ if __name__ == "__main__":
         for x in ready:
             data = x.recv(1500)
             port_number = x.fileno()
-            print 'port number: %s' % (port_number)
             parsed_data = json.loads(data)
             message_type = parsed_data['type']
             if message_type == 'bpdu':
@@ -115,21 +118,24 @@ if __name__ == "__main__":
                     bridge.bpdu_sockets.append(x)
                 bridge.recieve_bpdu(parsed_data, port_number)
             elif message_type == 'data':
+                print "recieving message on port : %s" % port_number
                 if parsed_data['dest'] not in bridge.routing_table:
-                    bridge.broadcast_open(data)
+                    bridge.broadcast_open(data, port_number)
                 else:
                     bridge.routing_table[data['dest']].send(parsed_data)
                 pass
 
-        print 'debug iteration %d\n' % debug_iteration
+        #print 'debug iteration %d\n' % debug_iteration
         debug_iteration += 1
         print 'My root is: %s\n' \
               'My cost is: %s\n' \
               'My designated bridge is: %s\n' \
-              'My root port is: %s' \
-              'My closed ports are: %s' \
+              'My root port is: %s\n' \
+              'My bridge ports are: %s\n' \
+              'My closed ports are: %s ' \
               % (bridge.root,
                  bridge.cost,
                  bridge.designated_bridge,
                  bridge.root_port,
+                 bridge.bridge_ports,
                  bridge.closed_ports)
