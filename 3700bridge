@@ -25,22 +25,23 @@ if __name__ == "__main__":
             self.sockets = []
             self.ports = len(lan)
             self.root_port = 0
-            self.designated_bridge = id
-            self.bridge_ports = []
+            self.designated_bridge_ports = {}
+            self.bridge_ports = {}
             self.closed_ports = []
             self.routing_table = {}
+            #only needed for testing
+            self.lan_ports = {}
             for x in range(self.ports):
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
                 s.connect(pad(lan[x]))
+                self.lan_ports[str(s.fileno())] = lan[x]
                 self.sockets.append(s)
-
             self.bpdu_sockets = []
 
         def update_bridge(self, message_root, message_cost, message_id, port_number):
             time_since_bpdu = time.time()
             self.root = message_root
             self.cost = message_cost + 1
-            self.designated_bridge = message_id
             self.root_port = port_number
             self.send_bpdu()
 
@@ -57,7 +58,7 @@ if __name__ == "__main__":
             message_id = message['id']
 
             if port_number not in self.bridge_ports:
-                self.bridge_ports.append(port_number)
+                self.bridge_ports[port_number] = message_id
 
             if int(message_root, 16) < int(self.root, 16):
                 self.update_bridge(message_root, message_cost, message_id, port_number)
@@ -68,18 +69,23 @@ if __name__ == "__main__":
 
         def close_ports(self):
             if self.root_port != 0:
-                self.closed_ports = self.bridge_ports[:]
-                if self.root_port in self.closed_ports:
-                    self.closed_ports.remove(self.root_port)
+                for port_number, bridge_id in self.bridge_ports.items():
+                    if port_number != self.root_port \
+                            and int(bridge_id, 16) < int(self.id, 16) \
+                            and port_number not in bridge.closed_ports:
+                        self.closed_ports.append(port_number)
 
         def broadcast_all(self, message):
             for x in self.sockets:
                 x.send(message)
 
         def broadcast_open(self, message, incoming_port):
+            all_bridge_ports = []
+            for port_number, bridge_id in self.bridge_ports.items():
+                all_bridge_ports.append(port_number)
             for x in self.sockets:
-                incoming_bridge_port = (x.fileno() == incoming_port and incoming_port in self.bridge_ports)
-                if x.fileno() not in self.closed_ports and not incoming_bridge_port:
+                incoming_bridge_port = (x.fileno() == incoming_port)
+                if not incoming_bridge_port and x.fileno() not in self.closed_ports:
                     print 'broadcasting %s to %s' % (message, x.fileno())
                     x.send(message)
 
@@ -96,7 +102,7 @@ if __name__ == "__main__":
     debug_iteration = 1
     while True:
         # Calls select with all the sockets; change the timeout value (1)
-        if time.time() - .5 > time_since_bpdu:
+        if time.time() - 1 > time_since_bpdu:
             bridge.close_ports()
 
         ##### IS THIS LOGIC NEEDEED (send bpdu every 500ms regardless #####
@@ -117,7 +123,7 @@ if __name__ == "__main__":
                 if x not in bridge.bpdu_sockets:
                     bridge.bpdu_sockets.append(x)
                 bridge.recieve_bpdu(parsed_data, port_number)
-            elif message_type == 'data':
+            elif message_type == 'data' and port_number not in bridge.closed_ports:
                 print "recieving message on port : %s" % port_number
                 if parsed_data['dest'] not in bridge.routing_table:
                     bridge.broadcast_open(data, port_number)
@@ -129,13 +135,13 @@ if __name__ == "__main__":
         debug_iteration += 1
         print 'My root is: %s\n' \
               'My cost is: %s\n' \
-              'My designated bridge is: %s\n' \
+              'My LAN Ports are: %s\n' \
               'My root port is: %s\n' \
               'My bridge ports are: %s\n' \
               'My closed ports are: %s ' \
               % (bridge.root,
                  bridge.cost,
-                 bridge.designated_bridge,
+                 bridge.lan_ports,
                  bridge.root_port,
                  bridge.bridge_ports,
                  bridge.closed_ports)
