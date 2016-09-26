@@ -23,20 +23,17 @@ if __name__ == "__main__":
             self.root = id
             self.cost = 0
             self.sockets = []
-            self.ports = len(lan)
             self.root_port = 0
-            self.designated_bridge_ports = {}
             self.bridge_ports = {}
             self.closed_ports = []
             self.routing_table = {}
             #only needed for testing
             self.lan_ports = {}
-            for x in range(self.ports):
+            for x in range(len(lan)):
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
                 s.connect(pad(lan[x]))
                 self.lan_ports[str(s.fileno())] = lan[x]
                 self.sockets.append(s)
-            self.bpdu_sockets = []
 
         def update_bridge(self, message_root, message_cost, message_id, port_number):
             time_since_bpdu = time.time()
@@ -57,8 +54,18 @@ if __name__ == "__main__":
             message_cost = message['cost']
             message_id = message['id']
 
-            if port_number not in self.bridge_ports:
-                self.bridge_ports[port_number] = message_id
+            #if self.id != message_id:
+            if port_number in self.bridge_ports:
+                add_bridge = True
+                for bridge_port in self.bridge_ports[port_number]:
+                    if bridge_port['id'] == message_id:
+                        add_bridge = False
+                        bridge_port['cost'] = message_cost
+                        break
+                if add_bridge:
+                    self.bridge_ports[port_number].append(message)
+            else:
+                self.bridge_ports[port_number] = [message]
 
             if int(message_root, 16) < int(self.root, 16):
                 self.update_bridge(message_root, message_cost, message_id, port_number)
@@ -67,13 +74,27 @@ if __name__ == "__main__":
             elif message_root == self.root and message_cost + 1 == self.cost and int(message_id, 16) < int(self.id, 16):
                 self.update_bridge(message_root, message_cost, message_id, port_number)
 
+            self.close_ports()
+
         def close_ports(self):
-            if self.root_port != 0:
-                for port_number, bridge_id in self.bridge_ports.items():
-                    if port_number != self.root_port \
-                            and int(bridge_id, 16) < int(self.id, 16) \
-                            and port_number not in bridge.closed_ports:
-                        self.closed_ports.append(port_number)
+            closed_ports = []
+            highest_lan_port = 0
+            for port_number, bridges in self.bridge_ports.items():
+                for port_bridge in bridges:
+                    if port_number != self.root_port:
+                        if port_bridge['cost'] < self.cost:
+                            closed_ports.append(port_number)
+                        elif port_bridge['cost'] == self.cost and int(port_bridge['id'], 16) < int(self.id, 16):
+                            closed_ports.append(port_number)
+                        elif port_bridge['id'] == self.id:
+                            if port_number > highest_lan_port:
+                                closed_ports.append(highest_lan_port)
+                                highest_lan_port = port_number
+                            else:
+                                closed_ports.append(port_number)
+            if 0 in closed_ports:
+                closed_ports.remove(0)
+            self.closed_ports = list(set(closed_ports))
 
         def broadcast_all(self, message):
             for x in self.sockets:
@@ -81,12 +102,12 @@ if __name__ == "__main__":
 
         def broadcast_open(self, message, incoming_port):
             all_bridge_ports = []
-            for port_number, bridge_id in self.bridge_ports.items():
+            for port_number, bridges in self.bridge_ports.items():
                 all_bridge_ports.append(port_number)
             for x in self.sockets:
                 incoming_bridge_port = (x.fileno() == incoming_port)
                 if not incoming_bridge_port and x.fileno() not in self.closed_ports:
-                    print 'broadcasting %s to %s' % (message, x.fileno())
+                    #print 'broadcasting %s to %s' % (message, x.fileno())
                     x.send(message)
 
     bridge = Bridge(id, LAN)
@@ -101,9 +122,6 @@ if __name__ == "__main__":
     # Main loop
     debug_iteration = 1
     while True:
-        # Calls select with all the sockets; change the timeout value (1)
-        if time.time() - 1 > time_since_bpdu:
-            bridge.close_ports()
 
         ##### IS THIS LOGIC NEEDEED (send bpdu every 500ms regardless #####
         # if time.time() - bpdu_timer > .5:
@@ -120,16 +138,14 @@ if __name__ == "__main__":
             parsed_data = json.loads(data)
             message_type = parsed_data['type']
             if message_type == 'bpdu':
-                if x not in bridge.bpdu_sockets:
-                    bridge.bpdu_sockets.append(x)
                 bridge.recieve_bpdu(parsed_data, port_number)
             elif message_type == 'data' and port_number not in bridge.closed_ports:
-                print "recieving message on port : %s" % port_number
-                if parsed_data['dest'] not in bridge.routing_table:
+                #if parsed_data['dest'] not in bridge.routing_table:
                     bridge.broadcast_open(data, port_number)
-                else:
-                    bridge.routing_table[data['dest']].send(parsed_data)
-                pass
+                #    bridge.routing_table[parsed_data['source']] = x
+                #else:
+                #    bridge.routing_table[parsed_data['dest']].send(data)
+               # pass
 
         #print 'debug iteration %d\n' % debug_iteration
         debug_iteration += 1
@@ -145,3 +161,4 @@ if __name__ == "__main__":
                  bridge.root_port,
                  bridge.bridge_ports,
                  bridge.closed_ports)
+        #print 'My closed ports are: %s\nMy bridge ports are : %s' % (bridge.closed_ports, bridge.bridge_ports)
