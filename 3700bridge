@@ -138,14 +138,14 @@ if __name__ == "__main__":
             parsed_data = json.loads(data)
             message_type = parsed_data['type']
             if message_type == 'bpdu':
+                bridge.routing_table = {}
                 bridge.recieve_bpdu(parsed_data, port_number)
             elif message_type == 'data' and port_number not in bridge.closed_ports:
-                #if parsed_data['dest'] not in bridge.routing_table:
+                bridge.routing_table[parsed_data['source']] = x
+                if parsed_data['dest'] not in bridge.routing_table:
                     bridge.broadcast_open(data, port_number)
-                #    bridge.routing_table[parsed_data['source']] = x
-                #else:
-                #    bridge.routing_table[parsed_data['dest']].send(data)
-               # pass
+                elif port_number != bridge.routing_table[parsed_data['dest']].fileno():
+                    bridge.routing_table[parsed_data['dest']].send(data)
 
         #print 'debug iteration %d\n' % debug_iteration
         debug_iteration += 1
