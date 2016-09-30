@@ -38,6 +38,7 @@ if __name__ == "__main__":
                 self.sockets.append(s)
 
         def update_bridge(self, message_root, message_cost, message_id, port_number):
+            self.routing_table = {}
             self.root = message_root
             self.cost = message_cost + 1
             self.root_port = port_number
@@ -54,6 +55,8 @@ if __name__ == "__main__":
             message_root = message['root']
             message_cost = message['cost']
             message_id = message['id']
+            message['last_bpdu'] = time.time()
+            message_last_bpdu = message['last_bpdu']
 
             if port_number in self.bridge_ports:
                 add_bridge = True
@@ -61,6 +64,7 @@ if __name__ == "__main__":
                     if bridge_port['id'] == message_id:
                         add_bridge = False
                         bridge_port['cost'] = message_cost
+                        bridge_port['last_bpdu'] = message_last_bpdu
                         break
                 if add_bridge:
                     self.bridge_ports[port_number].append(message)
@@ -78,7 +82,6 @@ if __name__ == "__main__":
 
         def close_ports(self):
             closed_ports = []
-            highest_lan_port = 0
             for port_number, bridges in self.bridge_ports.items():
                 for port_bridge in bridges:
                     if port_number != self.root_port:
@@ -86,19 +89,8 @@ if __name__ == "__main__":
                             closed_ports.append(port_number)
                         elif port_bridge['cost'] == self.cost and int(port_bridge['id'], 16) < int(self.id, 16):
                             closed_ports.append(port_number)
-                        # elif port_bridge['id'] == self.id:
-                        #     if port_number > highest_lan_port:
-                        #         closed_ports.append(highest_lan_port)
-                        #         highest_lan_port = port_number
-                        #     else:
-                        #         closed_ports.append(port_number)
-            if 0 in closed_ports:
-                closed_ports.remove(0)
-            self.closed_ports = list(set(closed_ports))
 
-        def broadcast_all(self, message):
-            for x in self.sockets:
-                x.send(message)
+            self.closed_ports = list(set(closed_ports))
 
         def broadcast_open(self, message, incoming_port):
             all_bridge_ports = []
@@ -114,7 +106,6 @@ if __name__ == "__main__":
     print "Bridge " + bridge.id + " starting up\n"
 
     bpdu_timer = time.time()
-    time.sleep(.1)  # give time for all bridges to initialize before we send initial bpdu
     bridge.send_bpdu()
 
     # Main loop
@@ -126,6 +117,15 @@ if __name__ == "__main__":
             bridge.send_bpdu()
             bpdu_timer = time.time()
             continue
+        for port_number, bridges in bridge.bridge_ports.items():
+            for port_bridge in bridges:
+                if time.time() - port_bridge['last_bpdu'] > .75:
+                    print "BRIDGE %s IS SHUTTING DOWN" % port_bridge['id']
+                    bridges.remove(port_bridge)
+                    bridge.routing_table = {}
+                    bridge.send_bpdu()
+                    bpdu_timer = time.time()
+                    continue
 
         ready, ignore, ignore2 = select.select(bridge.sockets, [], [], 1)
 
@@ -136,7 +136,6 @@ if __name__ == "__main__":
             parsed_data = json.loads(data)
             message_type = parsed_data['type']
             if message_type == 'bpdu':
-                bridge.routing_table = {}
                 bridge.recieve_bpdu(parsed_data, port_number)
             elif message_type == 'data' and port_number not in bridge.closed_ports:
                 bridge.routing_table[parsed_data['source']] = x
@@ -159,4 +158,4 @@ if __name__ == "__main__":
         #          bridge.root_port,
         #          bridge.bridge_ports,
         #          bridge.closed_ports)
-        print 'My closed ports are: %s\nMy bridge ports are : %s' % (bridge.closed_ports, bridge.bridge_ports)
+        #print 'My closed ports are: %s\nMy bridge ports are : %s' % (bridge.closed_ports, bridge.bridge_ports)
