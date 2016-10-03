@@ -146,6 +146,7 @@ if __name__ == "__main__":
         for host, last_sent in bridge.routing_time_table.items():
             if time.time() - last_sent > 5:
                 print 'DELETE HOST'
+                bridge.routing_time_table.pop(host, None)
 
         ready, ignore, ignore2 = select.select(bridge.sockets, [], [], 1)
 
