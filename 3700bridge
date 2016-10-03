@@ -27,18 +27,31 @@ if __name__ == "__main__":
             self.bridge_ports = {}
             self.closed_ports = []
             self.routing_table = {}
+            self.routing_time_table = {}
             #only needed for testing
             self.lan_ports = {}
 
-            lan = list(set(lan))
+            duplicate_lan_ports = {}
+
+            for lan_id in lan:
+                if lan.count(lan_id) > 1:
+                    duplicate_lan_ports[lan_id] = None
             for x in range(len(lan)):
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
                 s.connect(pad(lan[x]))
-                self.lan_ports[str(s.fileno())] = lan[x]
+                if lan[x] in duplicate_lan_ports:
+                    print 'gets Here'
+                    if duplicate_lan_ports[lan[x]] is None or s.fileno() < duplicate_lan_ports[lan[x]].fileno():
+                        duplicate_lan_ports[lan[x]] = s
+                else:
+                    self.lan_ports[str(s.fileno())] = lan[x]
+                    self.sockets.append(s)
+            for lan, s in duplicate_lan_ports.items():
+                self.lan_ports[str(s.fileno())] = lan
                 self.sockets.append(s)
 
         def update_bridge(self, message_root, message_cost, message_id, port_number):
-            self.routing_table = {}
+            self.clear_routing_table()
             self.root = message_root
             self.cost = message_cost + 1
             self.root_port = port_number
@@ -101,6 +114,10 @@ if __name__ == "__main__":
                 if not incoming_bridge_port and x.fileno() not in self.closed_ports:
                     x.send(message)
 
+        def clear_routing_table(self):
+            self.routing_table = {}
+            self.routing_time_table = {}
+
     bridge = Bridge(id, LAN)
 
     print "Bridge " + bridge.id + " starting up\n"
@@ -122,10 +139,13 @@ if __name__ == "__main__":
                 if time.time() - port_bridge['last_bpdu'] > .75:
                     print "BRIDGE %s IS SHUTTING DOWN" % port_bridge['id']
                     bridges.remove(port_bridge)
-                    bridge.routing_table = {}
+                    bridge.clear_routing_table()
                     bridge.send_bpdu()
                     bpdu_timer = time.time()
                     continue
+        for host, last_sent in bridge.routing_time_table.items():
+            if time.time() - last_sent > 5:
+                print 'DELETE HOST'
 
         ready, ignore, ignore2 = select.select(bridge.sockets, [], [], 1)
 
@@ -139,6 +159,7 @@ if __name__ == "__main__":
                 bridge.recieve_bpdu(parsed_data, port_number)
             elif message_type == 'data' and port_number not in bridge.closed_ports:
                 bridge.routing_table[parsed_data['source']] = x
+                bridge.routing_time_table[parsed_data['source']] = time.time()
                 if parsed_data['dest'] not in bridge.routing_table:
                     bridge.broadcast_open(data, port_number)
                 elif port_number != bridge.routing_table[parsed_data['dest']].fileno():
