@@ -19,50 +19,80 @@ if __name__ == "__main__":
 
     class Bridge(object):
         def __init__(self, id, lan):
+            # Unique Identifier of the bridge
             self.id = id
+            # ID of the root bridge (Should be the same among all bridges once the tree is complete)
             self.root = id
+            # Cost from current bridge to root
             self.cost = 0
+            # List of sockets represented as ports of a bridge
             self.sockets = []
+            # Port number that leads to the root Bridge
             self.root_port = 0
+            # An object representation of which bridges are on which ports.
+            # e.g. (3 : [{id : 08ad, cost : 2, last_bpdu : Time}...]
+            # last_bpdu is the last time This Bridge received a bpdu from the bridge in the list
             self.bridge_ports = {}
+            # a list of port numbers that will not receive or send messages
             self.closed_ports = []
+            # An object representation of which host is on which socket
+            # e.g. {'host' : Socket}
             self.routing_table = {}
+            # An object representation of how long a host has existed on the routing table
+            # e.g. {'host' : Time}
             self.routing_time_table = {}
+
+
             #only needed for testing
             self.lan_ports = {}
 
+            # An object representation of duplicate ports connected to the same lan
+            # This object will be used to find the lowest port number for port numbers connected to the same Lan
+            # e.g. {Lan_id : port_number }
             duplicate_lan_ports = {}
 
+            # Populate duplicate_lan_ports with lans that appear more than once in list of lans
             for lan_id in lan:
                 if lan.count(lan_id) > 1:
                     duplicate_lan_ports[lan_id] = None
+
+            # Populate Sockets and duplicate_lan_ports with sockets with the lowest port numbers
             for x in range(len(lan)):
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
                 s.connect(pad(lan[x]))
                 if lan[x] in duplicate_lan_ports:
-                    print 'gets Here'
                     if duplicate_lan_ports[lan[x]] is None or s.fileno() < duplicate_lan_ports[lan[x]].fileno():
                         duplicate_lan_ports[lan[x]] = s
                 else:
                     self.lan_ports[str(s.fileno())] = lan[x]
                     self.sockets.append(s)
+            # Populate Sockets with the lowest port numbers tied to a Lan from duplicate_lan_ports
             for lan, s in duplicate_lan_ports.items():
                 self.lan_ports[str(s.fileno())] = lan
                 self.sockets.append(s)
 
-        def update_bridge(self, message_root, message_cost, message_id, port_number):
+        # Responsible for updating the bridge with the new root, cost and or port_number
+        # Also clears the routing table and continues to send bpdu's to connected bridges
+        def update_bridge(self, message_root, message_cost, port_number):
             self.clear_routing_table()
             self.root = message_root
             self.cost = message_cost + 1
             self.root_port = port_number
             self.send_bpdu()
 
+        # Sends a bpdu to all connected connected bridges
         def send_bpdu(self):
             for s in self.sockets:
                 bpdu_message = {"source": self.id, "dest": 'ffff', "type": 'bpdu',
                                 "message": {"id": self.id, "root": self.root, "cost": self.cost}}
                 s.send(json.dumps(bpdu_message))
 
+        # recieves a bpdu from a specifc port_number and handles it based on the following logic
+        # If the bpdu contains a root that is smaller update this bridge
+        # If it is the same root but less cost update this bridge
+        # If the previous two are the same and the bridge_id is less then update this bridge (used to break the tie)
+        # Then regardless of whether the tree is updated close the correct ports
+        # This function is also responsible for populating bridge_port to know which bridges are from which port
         def recieve_bpdu(self, data, port_number):
             message = data['message']
             message_root = message['root']
@@ -85,14 +115,17 @@ if __name__ == "__main__":
                 self.bridge_ports[port_number] = [message]
 
             if int(message_root, 16) < int(self.root, 16):
-                self.update_bridge(message_root, message_cost, message_id, port_number)
+                self.update_bridge(message_root, message_cost, port_number)
             elif message_root == self.root and message_cost + 1 < self.cost:
-                self.update_bridge(message_root, message_cost, message_id, port_number)
+                self.update_bridge(message_root, message_cost, port_number)
             elif message_root == self.root and message_cost + 1 == self.cost and int(message_id, 16) < int(self.id, 16):
-                self.update_bridge(message_root, message_cost, message_id, port_number)
+                self.update_bridge(message_root, message_cost, port_number)
 
             self.close_ports()
 
+        # Closes the correct ports by knowing using bridge_port to know which bridges are on which port
+        # Closes a port if the port is not a bridge port and their cost to root is than this cost to root
+        # Or if the cost is the same and their bridge_id is smaller
         def close_ports(self):
             closed_ports = []
             for port_number, bridges in self.bridge_ports.items():
@@ -105,35 +138,45 @@ if __name__ == "__main__":
 
             self.closed_ports = list(set(closed_ports))
 
+        # Responsible for sending messages to all non-incoming ports when the host is not in the routing table
         def broadcast_open(self, message, incoming_port):
-            all_bridge_ports = []
-            for port_number, bridges in self.bridge_ports.items():
-                all_bridge_ports.append(port_number)
             for x in self.sockets:
                 incoming_bridge_port = (x.fileno() == incoming_port)
                 if not incoming_bridge_port and x.fileno() not in self.closed_ports:
                     x.send(message)
 
+        # Clears the routing table
         def clear_routing_table(self):
             self.routing_table = {}
             self.routing_time_table = {}
 
+    # Create the Bridge
     bridge = Bridge(id, LAN)
 
     print "Bridge " + bridge.id + " starting up\n"
 
+    # timer to know to send bpdu every 500ms
     bpdu_timer = time.time()
+
+    # Initial sending bpdu on start
     bridge.send_bpdu()
 
     # Main loop
     debug_iteration = 1
     while True:
 
-        ##### IS THIS LOGIC NEEDEED (send bpdu every 500ms regardless #####
+        # Used to send a bpdu every 500ms
         if time.time() - bpdu_timer > .5:
             bridge.send_bpdu()
             bpdu_timer = time.time()
             continue
+
+        # Used to shut down bridges that have not sent a bpdu in 750ms
+        # Shut down includes :
+        # Removing bridge from bridge_ports
+        # Clearing the routing table
+        # sending a new bpdu
+        # resetting the timer to send every 500ms
         for port_number, bridges in bridge.bridge_ports.items():
             for port_bridge in bridges:
                 if time.time() - port_bridge['last_bpdu'] > .75:
@@ -143,21 +186,32 @@ if __name__ == "__main__":
                     bridge.send_bpdu()
                     bpdu_timer = time.time()
                     continue
+
+        # Used to delete hosts from routing tables that haven't sent a message in 5 sec
+        # We can assume a host has disconnected if they haven't sent a message in 5 sec
         for host, last_sent in bridge.routing_time_table.items():
             if time.time() - last_sent > 5:
                 print 'DELETE HOST'
                 bridge.routing_time_table.pop(host, None)
+                bridge.routing_table.pop(host, None)
+
 
         ready, ignore, ignore2 = select.select(bridge.sockets, [], [], 1)
 
         # Reads from each fo the ready sockets
         for x in ready:
             data = x.recv(1500)
+
+            # We use the socket file number as the port number for sockets
             port_number = x.fileno()
             parsed_data = json.loads(data)
             message_type = parsed_data['type']
             if message_type == 'bpdu':
                 bridge.recieve_bpdu(parsed_data, port_number)
+
+            # Only process messages that aren't in closed ports and check to see if
+            # The hosts are in the routing table and if they arent broadcast the message
+            # Also updates the routing table from the sending host
             elif message_type == 'data' and port_number not in bridge.closed_ports:
                 bridge.routing_table[parsed_data['source']] = x
                 bridge.routing_time_table[parsed_data['source']] = time.time()
