@@ -114,14 +114,17 @@ if __name__ == "__main__":
                     # we want to use message_id if bool(message_root) evaluates to False, as that would indicate
                     # that the other bridge is also in the process of initialization and we have just determined
                     # that they are the root (at least, currently)
-                    self.update_bridge(message_root if message_root else message_id, 0, port_number)
+                    self.root = message_id
+                    self.cost = 1
+                    self.root_port = port_number
                 else:
                     print 'I AM THE ROOT!'
                     self.root = self.id
                     self.cost = 0
                     self.root_port = None
-                    self.send_bpdu()
-                    return
+
+                self.send_bpdu()
+                return
 
             # If the incoming port is attached to a bridge
             if port_number in self.bridge_ports:
@@ -136,6 +139,11 @@ if __name__ == "__main__":
                     self.bridge_ports[port_number].append(message)
             else:
                 self.bridge_ports[port_number] = [message]
+
+            # If the other bridge is still initializing, it might have a cost of None. In this case, we want
+            # to locally change it to 0 (because as far as we know, the other bridge is the root)
+            if message_cost is None:
+                message_cost = 0
 
             # BPDU contains a smaller root
             if int(message_root, 16) < int(self.root, 16):
