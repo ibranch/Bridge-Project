@@ -24,13 +24,16 @@ if __name__ == "__main__":
             # ID of the root bridge (Should be the same among all bridges once the tree is complete)
             self.root = id
             # Cost from current bridge to root
-            self.cost = 0
+            self.cost = None
             # List of sockets represented as ports of a bridge
             self.sockets = []
             # Port number that leads to the root Bridge
-            self.root_port = 0
+            self.root_port = None
             # An object representation of which bridges are on which ports.
-            # e.g. (3 : [{id : 08ad, cost : 2, last_bpdu : Time}...]
+            # Represented in the form {(port, [bridge, bridge, bridge...]), ...}
+            # Where bridges are represented in the form
+            # {id: <bridge id>, cost: <cost to root>, last_bpdu: <time>}
+            # e.g. {3 : [{id : 08ad, cost : 2, last_bpdu : Time}, ...], ...}
             # last_bpdu is the last time This Bridge received a bpdu from the bridge in the list
             self.bridge_ports = {}
             # a list of port numbers that will not receive or send messages
@@ -99,32 +102,55 @@ if __name__ == "__main__":
             message_cost = message['cost']
             message_id = message['id']
             message['last_bpdu'] = time.time()
-            message_last_bpdu = message['last_bpdu']
 
+            print 'GOT BPDU FROM %s' % message_id
+
+            # Are we still booting up for the first time?
+            if self.cost is None:
+                print 'I HAVE NO COST!'
+                # The only metric we can compare with is our ID and their ID
+                if int(message_id, 16) < int(self.id, 16):
+                    print 'HE IS THE ROOT!'
+                    # we want to use message_id if bool(message_root) evaluates to False, as that would indicate
+                    # that the other bridge is also in the process of initialization and we have just determined
+                    # that they are the root (at least, currently)
+                    self.update_bridge(message_root if message_root else message_id, 0, port_number)
+                else:
+                    print 'I AM THE ROOT!'
+                    self.root = self.id
+                    self.cost = 0
+                    self.root_port = None
+                    self.send_bpdu()
+                    return
+
+            # If the incoming port is attached to a bridge
             if port_number in self.bridge_ports:
                 add_bridge = True
                 for bridge_port in self.bridge_ports[port_number]:
                     if bridge_port['id'] == message_id:
                         add_bridge = False
                         bridge_port['cost'] = message_cost
-                        bridge_port['last_bpdu'] = message_last_bpdu
+                        bridge_port['last_bpdu'] = message['last_bpdu']
                         break
                 if add_bridge:
                     self.bridge_ports[port_number].append(message)
             else:
                 self.bridge_ports[port_number] = [message]
 
+            # BPDU contains a smaller root
             if int(message_root, 16) < int(self.root, 16):
                 self.update_bridge(message_root, message_cost, port_number)
+            # BPDU has the same root, but a lower cost
             elif message_root == self.root and message_cost + 1 < self.cost:
                 self.update_bridge(message_root, message_cost, port_number)
+            # BPDU has the same root and the same cost, but the sender has a lower ID
             elif message_root == self.root and message_cost + 1 == self.cost and int(message_id, 16) < int(self.id, 16):
                 self.update_bridge(message_root, message_cost, port_number)
 
             self.close_ports()
 
         # Closes the correct ports by knowing using bridge_port to know which bridges are on which port
-        # Closes a port if the port is not a bridge port and their cost to root is than this cost to root
+        # Closes a port if the port is not a bridge port and their cost to root is less than this cost to root
         # Or if the cost is the same and their bridge_id is smaller
         def close_ports(self):
             closed_ports = []
@@ -153,7 +179,7 @@ if __name__ == "__main__":
     # Create the Bridge
     bridge = Bridge(id, LAN)
 
-    print "Bridge " + bridge.id + " starting up\n"
+    print "Bridge " + bridge.id + " starting up"
 
     # timer to know to send bpdu every 500ms
     bpdu_timer = time.time()
