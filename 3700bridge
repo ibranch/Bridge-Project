@@ -6,6 +6,7 @@ import select
 import json
 import time
 
+
 # pads the name with null bytes at the end
 def pad(name):
     result = '\0' + name
@@ -13,9 +14,11 @@ def pad(name):
         result += '\0'
     return result
 
+
 if __name__ == "__main__":
     id = sys.argv[1]
     LAN = sys.argv[2:]
+
 
     class Bridge(object):
         def __init__(self, id, lan):
@@ -41,9 +44,11 @@ if __name__ == "__main__":
             # An object representation of how long a host has existed on the routing table
             # e.g. {'host' : Time}
             self.routing_time_table = {}
+            # An array of process functions to be called once the spanning tree is finished
+            self.stored_process_functions = []
+            self.time_last_updated = time.time()
 
-
-            #only needed for testing
+            # Only needed for testing
             self.lan_ports = {}
 
             # An object representation of duplicate ports connected to the same lan
@@ -145,10 +150,21 @@ if __name__ == "__main__":
                 if not incoming_bridge_port and x.fileno() not in self.closed_ports:
                     x.send(message)
 
+        def process_message(self, data, port_number):
+            parsed_data = json.loads(data)
+
+            self.routing_table[parsed_data['source']] = x
+            self.routing_time_table[parsed_data['source']] = time.time()
+            if parsed_data['dest'] not in self.routing_table:
+                self.broadcast_open(data, port_number)
+            elif port_number != self.routing_table[parsed_data['dest']].fileno():
+                self.routing_table[parsed_data['dest']].send(data)
+
         # Clears the routing table
         def clear_routing_table(self):
             self.routing_table = {}
             self.routing_time_table = {}
+
 
     # Create the Bridge
     bridge = Bridge(id, LAN)
@@ -195,6 +211,9 @@ if __name__ == "__main__":
                 bridge.routing_time_table.pop(host, None)
                 bridge.routing_table.pop(host, None)
 
+        if time.time() - bridge.time_last_updated > .750:
+            for process_data in bridge.stored_process_functions:
+                process_data()
 
         ready, ignore, ignore2 = select.select(bridge.sockets, [], [], 1)
 
@@ -213,14 +232,13 @@ if __name__ == "__main__":
             # The hosts are in the routing table and if they arent broadcast the message
             # Also updates the routing table from the sending host
             elif message_type == 'data' and port_number not in bridge.closed_ports:
-                bridge.routing_table[parsed_data['source']] = x
-                bridge.routing_time_table[parsed_data['source']] = time.time()
-                if parsed_data['dest'] not in bridge.routing_table:
-                    bridge.broadcast_open(data, port_number)
-                elif port_number != bridge.routing_table[parsed_data['dest']].fileno():
-                    bridge.routing_table[parsed_data['dest']].send(data)
+                if time.time() - bridge.time_last_updated > .750:
+                    bridge.process_message(data, port_number)
+                else:
+                    def func(): bridge.process_message(data, port_number)
+                    bridge.stored_process_functions.append(func)
 
-        #print 'debug iteration %d\n' % debug_iteration
+        # print 'debug iteration %d\n' % debug_iteration
         debug_iteration += 1
         # print 'My root is: %s\n' \
         #       'My cost is: %s\n' \
@@ -234,4 +252,4 @@ if __name__ == "__main__":
         #          bridge.root_port,
         #          bridge.bridge_ports,
         #          bridge.closed_ports)
-        #print 'My closed ports are: %s\nMy bridge ports are : %s' % (bridge.closed_ports, bridge.bridge_ports)
+        # print 'My closed ports are: %s\nMy bridge ports are : %s' % (bridge.closed_ports, bridge.bridge_ports)
