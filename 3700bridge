@@ -24,11 +24,11 @@ if __name__ == "__main__":
             # ID of the root bridge (Should be the same among all bridges once the tree is complete)
             self.root = id
             # Cost from current bridge to root
-            self.cost = 0  # TODO should initialize this as 0 or as None?
+            self.cost = 0
             # List of sockets represented as ports of a bridge
             self.sockets = []
             # Port number that leads to the root Bridge
-            self.root_port = None  # TODO verify that this doesn't cause any fucked up data interactions
+            self.root_port = None
             # An object representation of which bridges are on which ports.
             # Represented in the form {(port, [bridge, bridge, bridge...]), ...}
             # Where bridges are represented in the form
@@ -44,9 +44,6 @@ if __name__ == "__main__":
             # An object representation of how long a host has existed on the routing table
             # e.g. {'host' : Time}
             self.routing_time_table = {}
-            # A boolean value letting us know whether this bridge has heard a BPDU yet
-            self.rec_bpdu = False
-
 
             #only needed for testing
             self.lan_ports = {}
@@ -98,14 +95,12 @@ if __name__ == "__main__":
         # If the previous two are the same and the bridge_id is less then update this bridge (used to break the tie)
         # Then regardless of whether the tree is updated close the correct ports
         # This function is also responsible for populating bridge_port to know which bridges are from which port
-        def recieve_bpdu(self, data, port_number, first_bpdu=False):
+        def recieve_bpdu(self, data, port_number):
             message = data['message']
             message_root = message['root']
             message_cost = message['cost']
             message_id = message['id']
             message['last_bpdu'] = time.time()
-
-            print 'GOT BPDU FROM %s' % message_id
 
             # If the incoming port is attached to a bridge
             if port_number in self.bridge_ports:
@@ -121,31 +116,14 @@ if __name__ == "__main__":
             else:
                 self.bridge_ports[port_number] = [message]
 
-            # TODO is this conditional in the right place? I had it above the previous conditional last night
-            # Logic is slightly different, as we can only compare id (cost and roots not determined)
-            if first_bpdu:
-                self.rec_bpdu = True
-                # Other bridge is the local root
-                if int(message_id, 16) < int(self.id, 16):
-                    self.cost = 1
-                    self.root = message_id
-                    self.root_port = port_number
-                else:
-                    self.cost = 0
-                    self.root = self.id
-                    self.root_port = None
-                self.send_bpdu()
-                self.close_ports()  # TODO is this call necessary nikita?
-                return
-
             # BPDU contains a smaller root
             if int(message_root, 16) < int(self.root, 16):
                 self.update_bridge(message_root, message_cost, port_number)
             # BPDU has the same root, but a lower cost
             elif message_root == self.root and message_cost + 1 < self.cost:
                 self.update_bridge(message_root, message_cost, port_number)
-            # BPDU has the same root and the same cost, but the sender has a lower ID
-            elif message_root == self.root and message_cost + 1 == self.cost and int(message_id, 16) < int(self.id, 16):
+            # BPDU has the same root and the same cost, but the sender has a lower ID and our root port isn't already this one
+            elif message_root == self.root and message_cost + 1 == self.cost and int(message_id, 16) < int(self.id, 16) and self.root_port != message_root:
                 self.update_bridge(message_root, message_cost, port_number)
 
             self.close_ports()
@@ -233,8 +211,7 @@ if __name__ == "__main__":
             parsed_data = json.loads(data)
             message_type = parsed_data['type']
             if message_type == 'bpdu':
-                bridge.recieve_bpdu(parsed_data, port_number) if bridge.rec_bpdu else bridge.recieve_bpdu(parsed_data, port_number, first_bpdu=True)
-
+                bridge.recieve_bpdu(parsed_data, port_number)
             # Only process messages that aren't in closed ports and check to see if
             # The hosts are in the routing table and if they arent broadcast the message
             # Also updates the routing table from the sending host
