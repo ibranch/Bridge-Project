@@ -28,7 +28,7 @@ if __name__ == "__main__":
             # List of sockets represented as ports of a bridge
             self.sockets = []
             # Port number that leads to the root Bridge
-            self.root_port = 0
+            self.root_port = None
             # An object representation of which bridges are on which ports.
             # Represented in the form {(port, [bridge, bridge, bridge...]), ...}
             # Where bridges are represented in the form
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         def update_bridge(self, message_root, message_cost, port_number):
             self.clear_routing_table()
             self.root = message_root
-            self.cost = message_cost + 1
+            self.cost = (message_cost or 0) + 1  # Hack-y work around to prevent crashes when message_cost = None
             self.root_port = port_number
             self.send_bpdu()
 
@@ -96,13 +96,16 @@ if __name__ == "__main__":
         # If the previous two are the same and the bridge_id is less then update this bridge (used to break the tie)
         # Then regardless of whether the tree is updated close the correct ports
         # This function is also responsible for populating bridge_port to know which bridges are from which port
-        def recieve_bpdu(self, data, port_number):
+        def recieve_bpdu(self, data, port_number, first_bpdu=False):
             message = data['message']
             message_root = message['root']
             message_cost = message['cost']
             message_id = message['id']
             message['last_bpdu'] = time.time()
 
+            if first_bpdu:
+                self.update_bridge(message_root, message_cost, port_number)
+                return
 
             print 'GOT BPDU FROM %s' % message_id
 
@@ -170,8 +173,33 @@ if __name__ == "__main__":
     # Initial sending bpdu on start
     bridge.send_bpdu()
 
-    # Main loop
-    debug_iteration = 1
+    # Get a BPDU for initial conditions, first thing
+    rec_bpdu = False
+    while not rec_bpdu:
+        ready, ignore, ignore2 = select.select(bridge.sockets, [], [], 1)
+        for x in ready:
+            data = x.recv(1500)
+            message = json.loads(data)
+            # Keep looping over messages until we get a bpdu
+            if message['type'] == 'bpdu':
+                bpdu = message['message']
+                # If the other bridge has a lower ID
+                if int(bpdu['id'], 16) < bridge.id:
+                    bridge.recieve_bpdu({'message': {'root': bpdu['id'], 'cost': 0, 'id': bpdu['id']}},
+                                        x.fileno(),
+                                        first_bpdu=True)
+                else:
+                    bridge.recieve_bpdu({'message': {'root': bridge.id, 'cost': -1, 'id': bpdu['id']}},
+                                        x.fileno(),
+                                        first_bpdu=True)
+                rec_bpdu = True
+                break
+
+    # Sanity check
+    if bridge.cost is None or bridge.root_port is None:
+        raise Exception('Cost or Root Port not Initialized')
+
+    # Main Loop
     while True:
 
         # Used to send a bpdu every 500ms
